@@ -8,6 +8,41 @@
 [[applocker]]
 [[poc]]
 
+## About Rundll32 
+We should look at the path it is being executed from: 
+
+Ensure alwarys: 
+
+```
+\Windows\System32\rundll32.execute
+```
+OR
+```
+\Windows\SysWOW64\rundll32.execute
+```
+
+
+https://nasbench.medium.com/a-deep-dive-into-rundll32-exe-642344b41e90
+
+
+## Known abusers
+HAFNIUM: A likely state-sponsored cyber espionage group operating out of China that targets entities in the US across a number of industry sectors, including infectious disease researchers, law firms, higher education institutions, defense contractors, policy think tanks, and NGOs. 
+
+APT29 (aka Cozy Bear): A threat group that has been attributed to Russia's Foreign Intelligence Service (SVR) that often targets government networks in Europe and NATO member countries, research institutes, and think tanks. APT29 reportedly compromised the Democratic National Committee starting in the summer of 2015 and is reportedly responsible for the SolarWinds breach and the resulting supply-chain attack in 2020, where victims of this campaign included government, consulting, technology, telecom, and other organizations in North America, Europe, Asia, and the Middle East.
+
+Carbanak: An international cybercriminal group that targets financial institutions since at least 2013, they install VNC server software that executes through rundll32. 
+
+https://www.cybereason.com/blog/rundll32-the-infamous-proxy-for-executing-malicious-code 
+
+## OS Cred Dumping
+it could leverage comsvcs.dll (a Microsoft-signed DLL) which exports a function called MiniDumpW that rely on MiniDumpWriteDump to dump lsass.exe (Local Security Authority Subsystem Service) process memory to retrieve credentials.
+
+```
+rundll32.exe C:\windows\System32\comsvcs.dll, MiniDump <LSASS PID> <DUMP PATH> full
+```
+where <LSASS PID> is the process ID of LSASS and <DUMP PATH> the output to be written. Note that this requires Local Administrator or SYSTEM privileges.
+
+https://www.cybereason.com/blog/rundll32-the-infamous-proxy-for-executing-malicious-code 
 ## AppLocker bypass
 ### About
 Rundll32 is a Microsoft binary that can execute code that is inside a DLL file. Since this utility is part of the Windows operating system it can be used as a method in order to bypass AppLocker rules or Software Restriction Policies. So if the environment is not properly lockdown and users are permitted to use this binary then they can write their own DLL’s and bypass any restrictions or execute malicious JavaScript code.
@@ -117,6 +152,21 @@ These commands are entered into the Run window. We should then see registry edit
 
 https://pentestlab.blog/tag/rundll32/
 
+### COM Hijacking
+
+With a legitimate CLSID reference and registered Program ID (ProgID), we can simply hijack a registered COM structure under the context of an unprivileged user.  In this example, let’s load Casey Smith’s (@subTee) “scripting.dictionary” COM Hijack reg file that calls a remote COM script.  This sets us up for a “squiblydoo” AppLocker bypass 
+
+```
+rundll32.exe -sta {00000001-0000-0000-0000-0000FEEDACDC}
+```
+
+
+
+
+
+
+https://bohops.com/2018/06/28/abusing-com-registry-structure-clsid-localserver32-inprocserver32/
+
 ## Alternate Data Streams
 ### About
 using it as part of a persistence. 
@@ -167,17 +217,52 @@ CLSIDs subkeys (LocalServer32 and InprocServer32) can be enumerated to discover 
 
 https://bohops.com/2018/06/28/abusing-com-registry-structure-clsid-localserver32-inprocserver32/
 
+
+### Evasive DLL Loading
+discovered registry artifacts from VMware Workstation that were left behind after uninstalling the software from the machine.  Interestingly, the following CLSID and directory structures were still in place. 
+
+The folder structure also remained without the software binaries and dependencies.  The following ACL entries were effective on this folder
+
+(Un)fortunately, an unprivileged user lacks the ability to write to this directory.  However, we can still demonstrate a privileged user’s attempt to “blend in” by copying a ‘malicious’ DLL into the directory as ‘vmnetbridge.dll’ to influence InprocServer32 key loading:
+
+The below command can load the DLL payload associated with the corresponding CLSID. 
+
+Granted, this example loads under a privileged context, but the implications *could* become very interesting if a normal user can influence a path element of ‘abandoned’ registry CLSIDs.
+
+In general, this also makes for a viable persistence mechanism via Run key or Scheduled Task.
+
+https://bohops.com/2018/06/28/abusing-com-registry-structure-clsid-localserver32-inprocserver32/
+
 ### Commands
 Interestingly, CLSIDs can be called (‘invoked’) with this command:
 ```
 rundll32.exe -sta {CLSID}
 ```
+The -sta (/sta) switch refers to “single-threaded apartment” which is a part of the COM Threading Architecture.  
+
+Interestingly, powershell.exe has a -sta switch to start powershell with a single threaded apartment (by default after version 2 anyway).  When called with the respective CLSID (or ProgID if available), this switch in rundll32.exe loads (‘invokes’) the reference binary via LocalServer32 or InprocServer32.
+
+
+
 https://bohops.com/2018/06/28/abusing-com-registry-structure-clsid-localserver32-inprocserver32/
 ### Defence Strats
 Defensive recommendations – clean up artifacts after removal (e.g. unregister), monitor for suspicious events (e.g. rundll32.exe usage), and implement strong Application Whitelisting (AWL) policies/rules.
 
+Vendors should remove (e.g. unregister) COM registry artifacts (and disk artifacts) when utility software is uninstalled.  Additionally, vendors should not create CLSID binary path registry key-values that point to non-existent binaries
+
+Net defenders should monitor for interesting host activity, especially for rundll32.exe usage.  Take note the ‘sta’ switch can be successfuly called with a suffix such as ‘stagggg’ or ‘stagggggggggggggggggg’ along with the CLSID
+
+Organizations should implement strong Application Whitelisting (AWL) policies and move beyond default rules.
 
 https://bohops.com/2018/06/28/abusing-com-registry-structure-clsid-localserver32-inprocserver32/
+
+## DevSetCookie / Web Dav WebClient
+One of the mysterious command lines in a “rundll32.exe” instance that’ll show up a lot in the logs, takes the following format.
+```
+C:\WINDOWS\System32\rundll32.exe C:\Windows\system32\davclnt.dll,DavSetCookie <Host> <Share>
+```
+When using the “file://” protocol, whether be it in a word file, or via share windows will sometimes use (if SMB is disabled in some cases) the WebDav Client to request these files. When that happens a request will be made via the “rundll32.exe” utility.
+
 
 
 
